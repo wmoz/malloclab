@@ -1,3 +1,5 @@
+/* man ./tree.3 to see documentation on how to use this! */
+
 /*	$OpenBSD: tree.h,v 1.13 2011/07/09 00:19:45 pirofti Exp $	*/
 /*
  * Copyright 2002 Niels Provos <provos@citi.umich.edu>
