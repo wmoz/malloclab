@@ -456,12 +456,10 @@ static void remove_range(range_t **ranges, char *lo)
 {
     range_t *p;
     range_t **prevpp = ranges;
-    int size;
 
     for (p = *ranges;  p != NULL; p = p->next) {
         if (p->lo == lo) {
             *prevpp = p->next;
-            size = p->hi - p->lo + 1;
             free(p);
             break;
         }
