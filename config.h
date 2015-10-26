@@ -43,11 +43,11 @@
  * to their score.  This deters students from building extremely fast,
  * but extremely stupid malloc packages.
  *
- * gback@cs.vt.edu: I set this to a value that is achieved by a r/b 
- * tree-based implementation on our rlogin cluster as of Fall 2014; 
- * regardless of the speed of the actual libc
+ * gback@cs.vt.edu/spruett3@vt.edu: I set this to a value that is achieved by a r/b 
+ * tree-based implementation on our rlogin cluster as of Fall 2015; 
+ * regardless of the speed of the actual libc. Updated in Fall 2015.
  */
-#define AVG_LIBC_THRUPUT      14.6E6 /* 14600 Kops/sec */
+#define AVG_LIBC_THRUPUT      25.6E6 /* 14600 Kops/sec */
 
  /* 
   * This constant determines the contributions of space utilization
