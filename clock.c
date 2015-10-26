@@ -21,7 +21,7 @@
  * You can verify this for yourself using gcc -v.
  *******************************************************/
 
-#if defined(__i386__)  
+#if defined(__i386__)  || defined(__x86_64__)
 /*******************************************************
  * Pentium versions of start_counter() and get_counter()
  *******************************************************/
