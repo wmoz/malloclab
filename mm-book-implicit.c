@@ -11,6 +11,8 @@
 #include "mm.h"
 #include "memlib.h"
 
+#include "mm_ts.c"
+
 /*
  * If NEXT_FIT defined use next fit search, else use first fit search 
  */
@@ -336,13 +338,15 @@ static void *find_fit(size_t asize)
 
 static void printblock(void *bp) 
 {
-    size_t hsize, halloc, fsize, falloc;
+    size_t hsize/*, halloc, fsize, falloc*/;
 
     checkheap(0);
     hsize = GET_SIZE(HDRP(bp));
+/*
     halloc = GET_ALLOC(HDRP(bp));  
     fsize = GET_SIZE(FTRP(bp));
     falloc = GET_ALLOC(FTRP(bp));  
+*/
 
     if (hsize == 0) {
 	printf("%p: EOL\n", bp);

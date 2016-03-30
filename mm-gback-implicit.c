@@ -20,6 +20,8 @@
 #include "mm.h"
 #include "memlib.h"
 
+#include "mm_ts.c"
+
 struct boundary_tag {
     int inuse:1;        // inuse bit
     int size:31;        // size of block, in words

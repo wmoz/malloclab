@@ -4,9 +4,9 @@
 VERSION = 1
 
 CC = gcc
-CFLAGS = -Wall -O3 -Werror -m32
+CFLAGS = -Wall -O3 -Werror -m32 -pthread -std=gnu11
 # for debugging
-#CFLAGS = -Wall -g -Werror -m32
+#CFLAGS = -Wall -g -Werror -m32 -pthread -std=gnu11
 
 SHARED_OBJS = mdriver.o memlib.o fsecs.o fcyc.o clock.o ftimer.o list.o
 OBJS = $(SHARED_OBJS) mm.o
@@ -23,7 +23,7 @@ mdriver-gback: $(GBACK_IMPL_OBJS)
 	$(CC) $(CFLAGS) -o $@ $(GBACK_IMPL_OBJS)
 
 mdriver.o: mdriver.c fsecs.h fcyc.h clock.h memlib.h config.h mm.h
-memlib.o: memlib.c memlib.h
+memlib.o: memlib.c memlib.h config.h
 mm.o: mm.c mm.h memlib.h
 fsecs.o: fsecs.c fsecs.h config.h
 fcyc.o: fcyc.c fcyc.h

@@ -64,13 +64,13 @@
 /* 
  * Maximum heap size in bytes 
  */
-#define MAX_HEAP (20*(1<<20))  /* 20 MB */
+#define MAX_HEAP (1024*(1<<20))  /* 1024 MB */
 
 /*****************************************************************************
  * Set exactly one of these USE_xxx constants to "1" to select a timing method
  *****************************************************************************/
-#define USE_FCYC   1   /* cycle counter w/K-best scheme (x86 & Alpha only) */
+//#define USE_FCYC   1   /* cycle counter w/K-best scheme (x86 & Alpha only) */
 #define USE_ITIMER 0   /* interval timer (any Unix box) */
-#define USE_GETTOD 0   /* gettimeofday (any Unix box) */
+#define USE_GETTOD 1   /* gettimeofday (any Unix box) */
 
 #endif /* __CONFIG_H */

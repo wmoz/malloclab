@@ -15,6 +15,9 @@
 #include <assert.h>
 #include <float.h>
 #include <time.h>
+#include <stdint.h>
+#include <pthread.h>
+#include <sys/time.h>
 
 #include "mm.h"
 #include "memlib.h"
@@ -62,16 +65,6 @@ typedef struct {
     size_t *block_sizes; /* ... and a corresponding array of payload sizes */
 } trace_t;
 
-/* 
- * Holds the params to the xxx_speed functions, which are timed by fcyc. 
- * This struct is necessary because fcyc accepts only a pointer array
- * as input.
- */
-typedef struct {
-    trace_t *trace;  
-    range_t *ranges;
-} speed_t;
-
 /* Summarizes the important stats for some malloc function on some trace */
 typedef struct {
     /* defined for both libc malloc and student malloc package (mm.c) */
@@ -90,7 +83,6 @@ typedef struct {
  *******************/
 int verbose = 0;        /* global flag for verbose output */
 static int errors = 0;  /* number of errs found when running student malloc */
-char msg[MAXLINE];      /* for whenever we need to compose an error message */
 
 /* Directory where default tracefiles are found */
 static char tracedir[MAXLINE] = TRACEDIR;
@@ -108,11 +100,12 @@ static char *default_tracefiles[] = {
 /* these functions manipulate range lists */
 static int add_range(range_t **ranges, char *lo, int size, 
                      int tracenum, int opnum);
+static __thread int check_heap_bounds;  /* if off, do not check if ranges are within heap bounds */
 static void remove_range(range_t **ranges, char *lo);
 static void clear_ranges(range_t **ranges);
 
 /* These functions read, allocate, and free storage for traces */
-static trace_t *read_trace(char *tracedir, char *filename);
+static trace_t *read_trace(char *tracedir, char *filename, int verbose);
 static void free_trace(trace_t *trace);
 
 /* Routines for evaluating the correctness and speed of libc malloc */
@@ -121,9 +114,23 @@ static void eval_libc_speed(void *ptr);
 
 /* Routines for evaluating correctnes, space utilization, and speed 
    of the student's malloc package in mm.c */
+static int reset_heap(int tracenum);
 static int eval_mm_valid(trace_t *trace, int tracenum, range_t **ranges);
-static double eval_mm_util(trace_t *trace, int tracenum, range_t **ranges);
+static int eval_mm_valid_inner(trace_t *trace, int tracenum, range_t **ranges);
+struct single_run_args_for_valid {
+    char * tracefilename;
+    int tracenum;
+    pthread_barrier_t *go;
+};
+struct thread_run_result {
+    double secs;            // number of seconds used
+    int heapsize;      // size to which memlib heap grew
+};
+static void * eval_mm_valid_single(void *);
+static int eval_mm_util(trace_t *trace, int tracenum, range_t **ranges);
 static void eval_mm_speed(void *ptr);
+static void eval_mm_speed_inner(void *ptr);
+static void * eval_mm_speed_single(void *_args);
 
 /* Various helper routines */
 static void printresults(int n, char ** tracefiles, stats_t *stats);
@@ -132,6 +139,7 @@ static void usage(void);
 static void unix_error(char *msg);
 static void malloc_error(int tracenum, int opnum, char *msg);
 static void app_error(char *msg);
+static FILE * open_jsonfile(const char * filename_mask);
 
 /**************
  * Main routine
@@ -146,10 +154,10 @@ int main(int argc, char **argv)
     range_t *ranges = NULL;    /* keeps track of block extents for one trace */
     stats_t *libc_stats = NULL;/* libc stats for each trace */
     stats_t *mm_stats = NULL;  /* mm (i.e. student) stats for each trace */
-    speed_t speed_params;      /* input parameters to the xx_speed routines */ 
 
     int team_check = 1;  /* If set, check team structure (reset by -a) */
     int run_libc = 0;    /* If set, run libc malloc (set by -l) */
+    int nthreads = 0;    /* If set to > 0, number of threads for multi-threaded testing. */
     int autograder = 0;  /* If set, emit summary info for autograder (-g) */
     int use_mmap = 0;    /* If set, have memlib use mmap() instead malloc() */
 
@@ -160,7 +168,7 @@ int main(int argc, char **argv)
     /* 
      * Read and interpret the command line arguments 
      */
-    while ((c = getopt(argc, argv, "nf:t:hvVgal")) != EOF) {
+    while ((c = getopt(argc, argv, "nf:t:hvVgalm:")) != EOF) {
         switch (c) {
         case 'n':
             use_mmap = 1;
@@ -194,6 +202,9 @@ int main(int argc, char **argv)
             break;
         case 'V': /* Be more verbose than -v */
             verbose = 2;
+            break;
+        case 'm': /* Include multi-threaded testing */
+            nthreads = atoi(optarg);
             break;
         case 'h': /* Print this message */
             usage();
@@ -257,16 +268,15 @@ int main(int argc, char **argv)
         
         /* Evaluate the libc malloc package using the K-best scheme */
         for (i=0; i < num_tracefiles; i++) {
-            trace = read_trace(tracedir, tracefiles[i]);
+            trace = read_trace(tracedir, tracefiles[i], verbose > 1);
             libc_stats[i].ops = trace->num_ops;
             if (verbose > 1)
                 printf("Checking libc malloc for correctness, ");
             libc_stats[i].valid = eval_libc_valid(trace, i);
             if (libc_stats[i].valid) {
-                speed_params.trace = trace;
                 if (verbose > 1)
                     printf("and performance.\n");
-                libc_stats[i].secs = fsecs(eval_libc_speed, &speed_params);
+                libc_stats[i].secs = fsecs(eval_libc_speed, trace);
             }
             free_trace(trace);
         }
@@ -284,30 +294,105 @@ int main(int argc, char **argv)
     if (verbose > 1)
         printf("\nTesting mm malloc\n");
 
-    /* Allocate the mm stats array, with one stats_t struct per tracefile */
-    mm_stats = (stats_t *)calloc(num_tracefiles, sizeof(stats_t));
+    /* Allocate the mm stats array, with two stats_t struct per tracefile */
+    mm_stats = (stats_t *)calloc((nthreads > 0 ? 2 : 1) * num_tracefiles, sizeof(stats_t));
     if (mm_stats == NULL)
         unix_error("mm_stats calloc in main failed");
     
     /* Initialize the simulated memory system in memlib.c */
     mem_init(use_mmap); 
 
+    int max_total_size = 0;
     /* Evaluate student's mm malloc package using the K-best scheme */
     for (i=0; i < num_tracefiles; i++) {
-        trace = read_trace(tracedir, tracefiles[i]);
+        trace = read_trace(tracedir, tracefiles[i], verbose > 1);
         mm_stats[i].ops = trace->num_ops;
         if (verbose > 1)
             printf("Checking mm_malloc for correctness, ");
+        check_heap_bounds = 1;
         mm_stats[i].valid = eval_mm_valid(trace, i, &ranges);
         if (mm_stats[i].valid) {
             if (verbose > 1)
                 printf("efficiency, ");
-            mm_stats[i].util = eval_mm_util(trace, i, &ranges);
-            speed_params.trace = trace;
-            speed_params.ranges = ranges;
+
+            max_total_size = eval_mm_util(trace, i, &ranges);
+            mm_stats[i].util = ((double)max_total_size / (double)mem_heapsize());
             if (verbose > 1)
                 printf("and performance.\n");
-            mm_stats[i].secs = fsecs(eval_mm_speed, &speed_params);
+            mm_stats[i].secs = fsecs(eval_mm_speed, trace);
+        }
+
+        /* Test multithreaded behavior */
+        if (nthreads) {
+            if (verbose > 1)
+                printf("Checking multithreaded mm_malloc for correctness\n");
+            stats_t * ms = &mm_stats[i+num_tracefiles];
+            ms->ops = trace->num_ops * nthreads;
+
+            struct single_run_args_for_valid args[nthreads];
+            pthread_t threads[nthreads];
+            pthread_barrier_t go;
+            if (pthread_barrier_init(&go, NULL, nthreads)) {
+                perror("pthread_barrier_init");
+                abort();
+            }
+            reset_heap(i);
+
+            for (int j = 0; j < nthreads; j++) {
+                args[j].go = &go;
+                args[j].tracefilename = tracefiles[i];
+                args[j].tracenum = i;
+                if (pthread_create(threads + j, NULL, eval_mm_valid_single, args + j))
+                    perror("pthread_create"), exit(-1);
+            }
+
+            ms->valid = 1;
+            for (int j = 0; j < nthreads; j++) {
+                uintptr_t this_run_valid;
+                if (pthread_join(threads[j], (void **)&this_run_valid))
+                    perror("pthread_join"), exit(-1);
+
+                if (!this_run_valid)
+                    ms->valid = 0;
+            }
+            if (verbose > 1)
+                printf("Result appears to be valid.\n");
+
+            if (!ms->valid) {
+                printf("Result is not valid, skipping further multithreads tests.\n");
+            } else {
+                // we know max_total_size, the total amount of heap memory may vary.
+                // benchmark it a few times and take the average of utilization and speed.
+                const int REPEATS = 2;
+                long heap_size_avg = 0;
+                double runtime_avg = 0.0;
+                for (int k = 0; k < REPEATS; k++) {
+                    reset_heap(i);
+
+                    for (int j = 0; j < nthreads; j++) {
+                        args[j].go = &go;
+                        args[j].tracefilename = tracefiles[i];
+                        args[j].tracenum = i;
+                        if (pthread_create(threads + j, NULL, eval_mm_speed_single, args + j))
+                            perror("pthread_create"), exit(-1);
+                    }
+
+                    for (int j = 0; j < nthreads; j++) {
+                        struct thread_run_result *r;
+                        if (pthread_join(threads[j], (void **) &r))
+                            perror("pthread_join"), exit(-1);
+                        if (r) {
+                            runtime_avg += r->secs;
+                            heap_size_avg += r->heapsize;
+                            free(r);
+                        }
+                    }
+                }
+                runtime_avg /= REPEATS;
+                heap_size_avg /= REPEATS;
+                ms->util = ((double)nthreads * max_total_size) / heap_size_avg;
+                ms->secs = runtime_avg;
+            }
         }
         free_trace(trace);
     }
@@ -316,6 +401,12 @@ int main(int argc, char **argv)
     if (verbose) {
         printf("\nResults for mm malloc:\n");
         printresults(num_tracefiles, tracefiles, mm_stats);
+        printf("\n");
+    }
+
+    if (nthreads && verbose) {
+        printf("\nResults for multi-threaded mm malloc:\n");
+        printresults(num_tracefiles, tracefiles, mm_stats+num_tracefiles);
         printf("\n");
     }
 
@@ -368,10 +459,7 @@ int main(int argc, char **argv)
     }
 
     /* Write results to JSON file for submission */
-    char jsonfilename[80];
-    snprintf(jsonfilename, sizeof jsonfilename, "results.%d.json", getpid());
-    printf("Writing results to %s for submission to the scoreboard\n", jsonfilename);
-    FILE *json = fopen(jsonfilename, "w");
+    FILE * json = open_jsonfile("results.%d.json");
     fprintf(json, "{");
     fprintf(json, " \"results\": ");
     printresults_as_json(json, num_tracefiles, tracefiles, mm_stats);
@@ -380,10 +468,23 @@ int main(int argc, char **argv)
                 "{ \"avg_mm_util\": %f, \"avg_mm_throughput\" : %f, \"perfindex\": %f, \"AVG_LIBC_THRUPUT\": %f }\n", 
                 avg_mm_util, avg_mm_throughput, perfindex, AVG_LIBC_THRUPUT);
     }
+    if (nthreads > 0) {
+        fprintf(json, ", \"mtresults\": ");
+        printresults_as_json(json, num_tracefiles, tracefiles, mm_stats+num_tracefiles);
+    }
     fprintf(json, "}");
     fclose(json);
 
     exit(0);
+}
+
+static FILE *
+open_jsonfile(const char * filename_mask)
+{
+    char jsonfilename[80];
+    snprintf(jsonfilename, sizeof jsonfilename, filename_mask, getpid());
+    printf("Writing results to %s for submission to the scoreboard\n", jsonfilename);
+    return fopen(jsonfilename, "w");
 }
 
 
@@ -417,8 +518,9 @@ static int add_range(range_t **ranges, char *lo, int size,
     }
 
     /* The payload must lie within the extent of the heap */
-    if ((lo < (char *)mem_heap_lo()) || (lo > (char *)mem_heap_hi()) || 
-        (hi < (char *)mem_heap_lo()) || (hi > (char *)mem_heap_hi())) {
+    if (check_heap_bounds && (
+        (lo < (char *)mem_heap_lo()) || (lo > (char *)mem_heap_hi()) || 
+        (hi < (char *)mem_heap_lo()) || (hi > (char *)mem_heap_hi()))) {
         sprintf(msg, "Payload (%p:%p) lies outside heap (%p:%p)",
                 lo, hi, mem_heap_lo(), mem_heap_hi());
         malloc_error(tracenum, opnum, msg);
@@ -427,7 +529,7 @@ static int add_range(range_t **ranges, char *lo, int size,
 
     /* The payload must not overlap any other payloads */
     for (p = *ranges;  p != NULL;  p = p->next) {
-        if ((lo >= p->lo && lo <= p-> hi) ||
+        if ((lo >= p->lo && lo <= p->hi) ||
             (hi >= p->lo && hi <= p->hi)) {
             sprintf(msg, "Payload (%p:%p) overlaps another payload (%p:%p)\n",
                     lo, hi, p->lo, p->hi);
@@ -490,8 +592,9 @@ static void clear_ranges(range_t **ranges)
 /*
  * read_trace - read a trace file and store it in memory
  */
-static trace_t *read_trace(char *tracedir, char *filename)
+static trace_t *read_trace(char *tracedir, char *filename, int verbose)
 {
+    char msg[MAXLINE];
     FILE *tracefile;
     trace_t *trace;
     char type[MAXLINE];
@@ -500,7 +603,7 @@ static trace_t *read_trace(char *tracedir, char *filename)
     unsigned max_index = 0;
     unsigned op_index;
 
-    if (verbose > 1)
+    if (verbose)
         printf("Reading tracefile: %s\n", filename);
 
     /* Allocate the trace record */
@@ -590,10 +693,32 @@ void free_trace(trace_t *trace)
  * and throughput of the libc and mm malloc packages.
  **********************************************************************/
 
+static int
+reset_heap(int tracenum)
+{
+    /* Reset the heap and free any records in the range list */
+    mem_reset_brk();
+
+    /* Call the mm package's init function */
+    if (mm_init() < 0) {
+        malloc_error(tracenum, 0, "mm_init failed.");
+        return 0;
+    }
+    return 1;
+}
+
 /*
  * eval_mm_valid - Check the mm malloc package for correctness
  */
 static int eval_mm_valid(trace_t *trace, int tracenum, range_t **ranges) 
+{
+    if (!reset_heap(tracenum))
+        return 0;
+
+    return eval_mm_valid_inner(trace, tracenum, ranges);
+}
+
+static int eval_mm_valid_inner(trace_t *trace, int tracenum, range_t **ranges) 
 {
     int i, j;
     int index;
@@ -604,14 +729,7 @@ static int eval_mm_valid(trace_t *trace, int tracenum, range_t **ranges)
     char *p;
     
     /* Reset the heap and free any records in the range list */
-    mem_reset_brk();
     clear_ranges(ranges);
-
-    /* Call the mm package's init function */
-    if (mm_init() < 0) {
-        malloc_error(tracenum, 0, "mm_init failed.");
-        return 0;
-    }
 
     /* Interpret each operation in the trace in order */
     for (i = 0;  i < trace->num_ops;  i++) {
@@ -703,6 +821,28 @@ static int eval_mm_valid(trace_t *trace, int tracenum, range_t **ranges)
     return 1;
 }
 
+static void *
+eval_mm_valid_single(void *_args)
+{
+    struct single_run_args_for_valid * args = _args;
+
+    /* read our own copy of this trace */
+    trace_t * trace = read_trace(tracedir, args->tracefilename, 0);
+
+    // let threads start at approximately the same moment to increase chance
+    // of concurrency-related failures if proper synchronization is not used.
+    if (pthread_barrier_wait(args->go) == PTHREAD_BARRIER_SERIAL_THREAD) {
+        ;
+    }
+    range_t *ranges = NULL;
+    check_heap_bounds = 0;
+    int isvalid = eval_mm_valid_inner(trace, args->tracenum, &ranges);
+    assert (sizeof(int) <= sizeof(void*));
+    clear_ranges(&ranges);
+    free_trace(trace);
+    return (void *) isvalid;
+}
+
 /* 
  * eval_mm_util - Evaluate the space utilization of the student's package
  *   The idea is to remember the high water mark "hwm" of the heap for 
@@ -713,8 +853,9 @@ static int eval_mm_valid(trace_t *trace, int tracenum, range_t **ranges)
  *   doesn't allow the students to decrement the brk pointer, so brk
  *   is always the high water mark of the heap. 
  *   
+ *   Changed to return max_total_size
  */
-static double eval_mm_util(trace_t *trace, int tracenum, range_t **ranges)
+static int eval_mm_util(trace_t *trace, int tracenum, range_t **ranges)
 {   
     int i;
     int index;
@@ -793,9 +934,32 @@ static double eval_mm_util(trace_t *trace, int tracenum, range_t **ranges)
         }
     }
 
-    return ((double)max_total_size / (double)mem_heapsize());
+    return max_total_size;
 }
 
+static void *
+eval_mm_speed_single(void *_args)
+{
+    struct single_run_args_for_valid * args = _args;
+    struct timeval stv, etv;
+
+    /* read our own copy of this trace */
+    trace_t * trace = read_trace(tracedir, args->tracefilename, 0);
+
+    // we start the clock here to avoid accounting for thread startup overhead
+    pthread_barrier_wait(args->go);
+    gettimeofday(&stv, NULL);
+    eval_mm_speed_inner(trace);
+    gettimeofday(&etv,NULL);
+    free_trace(trace);
+    if (pthread_barrier_wait(args->go) == PTHREAD_BARRIER_SERIAL_THREAD) {
+        struct thread_run_result *r = malloc(sizeof (*r));
+        r->secs = (etv.tv_sec - stv.tv_sec) + 1E-6*(etv.tv_usec-stv.tv_usec);
+        r->heapsize = mem_heapsize();
+        return r;
+    } else
+        return NULL;
+}
 
 /*
  * eval_mm_speed - This is the function that is used by fcyc()
@@ -803,14 +967,20 @@ static double eval_mm_util(trace_t *trace, int tracenum, range_t **ranges)
  */
 static void eval_mm_speed(void *ptr)
 {
-    int i, index, size, newsize;
-    char *p, *newp, *oldp, *block;
-    trace_t *trace = ((speed_t *)ptr)->trace;
-
     /* Reset the heap and initialize the mm package */
     mem_reset_brk();
     if (mm_init() < 0) 
         app_error("mm_init failed in eval_mm_speed");
+
+    eval_mm_speed_inner(ptr);
+}
+
+static void eval_mm_speed_inner(void *ptr)
+{
+    int i, index, size, newsize;
+    char *p, *newp, *oldp, *block;
+    const trace_t *trace = (trace_t *)ptr;
+
 
     /* Interpret each trace request */
     for (i = 0;  i < trace->num_ops;  i++)
@@ -898,7 +1068,7 @@ static void eval_libc_speed(void *ptr)
     int i;
     int index, size, newsize;
     char *p, *newp, *oldp, *block;
-    trace_t *trace = ((speed_t *)ptr)->trace;
+    trace_t *trace = (trace_t *)ptr;
 
     for (i = 0;  i < trace->num_ops;  i++) {
         switch (trace->ops[i].type) {
