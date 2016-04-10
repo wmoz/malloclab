@@ -46,8 +46,13 @@
  * gback@cs.vt.edu/spruett3@vt.edu: I set this to a value that is achieved by a r/b 
  * tree-based implementation on our rlogin cluster as of Fall 2015; 
  * regardless of the speed of the actual libc. Updated in Fall 2015.
+ *
+ * gback: Again updated in Spring 2016 after switching to clock.
+ * This is a base line for a single-threaded implementation, without
+ * locking overhead, when clock() is used to time it.
+ * This is not meaningful for the multi-threaded implementation
  */
-#define AVG_LIBC_THRUPUT      25.6E6 /* 14600 Kops/sec */
+#define AVG_LIBC_THRUPUT      21.5E6 /* 21,500 Kops/sec */
 
  /* 
   * This constant determines the contributions of space utilization
@@ -69,8 +74,9 @@
 /*****************************************************************************
  * Set exactly one of these USE_xxx constants to "1" to select a timing method
  *****************************************************************************/
-//#define USE_FCYC   1   /* cycle counter w/K-best scheme (x86 & Alpha only) */
+#define USE_FCYC   0   /* cycle counter w/K-best scheme (x86 & Alpha only) */
 #define USE_ITIMER 0   /* interval timer (any Unix box) */
-#define USE_GETTOD 1   /* gettimeofday (any Unix box) */
+#define USE_GETTOD 0   /* gettimeofday (any Unix box) */
+#define USE_CLOCK  1   /* clock_gettime (Linux only) */
 
 #endif /* __CONFIG_H */

@@ -9,6 +9,7 @@
  *    ftimer_gettod: version that uses gettimeofday
  */
 #include <stdio.h>
+#include <time.h>
 #include <sys/time.h>
 #include "ftimer.h"
 
@@ -101,6 +102,37 @@ static double get_etime(void) {
 		     (first_p.it_value.tv_usec - r_curr.it_value.tv_usec)*1e-6);
 }
 
+// https://gist.github.com/diabloneo/9619917
+void timespec_diff(struct timespec *start, struct timespec *stop,
+                   struct timespec *result)
+{
+    if ((stop->tv_nsec - start->tv_nsec) < 0) {
+        result->tv_sec = stop->tv_sec - start->tv_sec - 1;
+        result->tv_nsec = stop->tv_nsec - start->tv_nsec + 1000000000;
+    } else {
+        result->tv_sec = stop->tv_sec - start->tv_sec;
+        result->tv_nsec = stop->tv_nsec - start->tv_nsec;
+    }
 
+    return;
+}
 
+/* 
+ * ftimer_clock - Use gettimeofday to estimate the running time of
+ * f(argp). Return the average of n runs.  
+ */
+double ftimer_clock(ftimer_test_funct f, void *argp, int n)
+{
+    int i;
+    struct timespec stv, etv, diff;
+
+    clock_gettime(CLOCK_MONOTONIC_RAW, &stv);
+    for (i = 0; i < n; i++) 
+	f(argp);
+    clock_gettime(CLOCK_MONOTONIC_RAW, &etv);
+    timespec_diff(&stv, &etv, &diff);
+    double rdiff = 1E6*diff.tv_sec + 1E-3*diff.tv_nsec; // in microseconds
+    rdiff /= n;
+    return (1E-6*rdiff);        // in seconds
+}
 

@@ -7,6 +7,7 @@
  * This is just a stop-gap solution.
  */
 #include <pthread.h>
+#ifdef THREAD_SAFE
 static pthread_mutex_t malloc_lock = PTHREAD_MUTEX_INITIALIZER;
 
 void *_mm_malloc_thread_unsafe(size_t size);
@@ -40,3 +41,7 @@ void *mm_realloc(void *ptr, size_t size)
 #define mm_free _mm_free_thread_unsafe
 #define mm_realloc _mm_realloc_thread_unsafe
 
+#else
+/* If THREAD_SAFE is not defined, we leave it as is in order
+ * to avoid the locking overhead. */
+#endif /* THREAD_SAFE */

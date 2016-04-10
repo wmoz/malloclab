@@ -60,6 +60,7 @@ typedef struct {
     int num_ids;         /* number of alloc/realloc ids */
     int num_ops;         /* number of distinct requests */
     int weight;          /* weight for this trace (unused) */
+    double multiplier;   /* multiply sizes by this amount */
     traceop_t *ops;      /* array of requests */
     char **blocks;       /* array of ptrs returned by malloc/realloc... */
     size_t *block_sizes; /* ... and a corresponding array of payload sizes */
@@ -141,6 +142,12 @@ static void malloc_error(int tracenum, int opnum, char *msg);
 static void app_error(char *msg);
 static FILE * open_jsonfile(const char * filename_mask);
 
+static int 
+max(int a, int b)
+{
+    return a < b ? b : a;
+}
+
 /**************
  * Main routine
  **************/
@@ -160,6 +167,7 @@ int main(int argc, char **argv)
     int nthreads = 0;    /* If set to > 0, number of threads for multi-threaded testing. */
     int autograder = 0;  /* If set, emit summary info for autograder (-g) */
     int use_mmap = 0;    /* If set, have memlib use mmap() instead malloc() */
+    int vary_size = 0;   /* If set, run each trace multiple times with varied sizes */
 
     /* temporaries used to compute the performance index */
     double secs, ops, util, avg_mm_util, avg_mm_throughput = 0, p1, p2, perfindex;
@@ -168,8 +176,11 @@ int main(int argc, char **argv)
     /* 
      * Read and interpret the command line arguments 
      */
-    while ((c = getopt(argc, argv, "nf:t:hvVgalm:")) != EOF) {
+    while ((c = getopt(argc, argv, "nf:t:hvVgalm:s")) != EOF) {
         switch (c) {
+        case 's':
+            vary_size = 1;
+            break;
         case 'n':
             use_mmap = 1;
             break;
@@ -303,24 +314,54 @@ int main(int argc, char **argv)
     mem_init(use_mmap); 
 
     int max_total_size = 0;
+
+    double * size_multipliers;
+    int n_multipliers;
+    double one[] = { 1.0 };
+    double many[] = { .75, 1.0, 1.25 };
+    if (vary_size) {
+        size_multipliers = many;
+        n_multipliers = sizeof(many)/sizeof(many[0]);
+    } else {
+        size_multipliers = one;
+        n_multipliers = 1;
+    }
+
     /* Evaluate student's mm malloc package using the K-best scheme */
     for (i=0; i < num_tracefiles; i++) {
         trace = read_trace(tracedir, tracefiles[i], verbose > 1);
         mm_stats[i].ops = trace->num_ops;
-        if (verbose > 1)
-            printf("Checking mm_malloc for correctness, ");
-        check_heap_bounds = 1;
-        mm_stats[i].valid = eval_mm_valid(trace, i, &ranges);
-        if (mm_stats[i].valid) {
-            if (verbose > 1)
-                printf("efficiency, ");
+        mm_stats[i].valid = 1;
+        mm_stats[i].util = 0.0;
+        mm_stats[i].secs = 0.0;
+        for (int mi = 0; mi < n_multipliers; mi++) {
+            trace->multiplier = size_multipliers[mi];
+            if (verbose > 1 && vary_size)
+                printf("Using trace multiplier: %f\n", size_multipliers[mi]);
 
-            max_total_size = eval_mm_util(trace, i, &ranges);
-            mm_stats[i].util = ((double)max_total_size / (double)mem_heapsize());
             if (verbose > 1)
-                printf("and performance.\n");
-            mm_stats[i].secs = fsecs(eval_mm_speed, trace);
+                printf("Checking mm_malloc for correctness, ");
+
+            check_heap_bounds = 1;
+            int thisrunvalid = eval_mm_valid(trace, i, &ranges);
+            if (!thisrunvalid)
+                mm_stats[i].valid = 0;
+
+            if (mm_stats[i].valid) {
+                if (verbose > 1)
+                    printf("efficiency, ");
+
+                int hwm = eval_mm_util(trace, i, &ranges);
+                if (size_multipliers[mi] == 1.0)    // record max high water mark
+                    max_total_size = hwm;
+                mm_stats[i].util += ((double)hwm / (double)mem_heapsize());
+                if (verbose > 1)
+                    printf("and performance.\n");
+                mm_stats[i].secs += fsecs(eval_mm_speed, trace);
+            }
         }
+        mm_stats[i].util /= n_multipliers;
+        mm_stats[i].secs /= n_multipliers;
 
         /* Test multithreaded behavior */
         if (nthreads) {
@@ -461,6 +502,14 @@ int main(int argc, char **argv)
     /* Write results to JSON file for submission */
     FILE * json = open_jsonfile("results.%d.json");
     fprintf(json, "{");
+    fprintf(json, " \"version\": \"1.1\",\n");
+    fprintf(json, " \"varysize\": %d,\n", vary_size);
+    fprintf(json, " \"nthreads\": %d,\n", nthreads);
+#ifdef THREAD_SAFE
+    fprintf(json, " \"THREAD_SAFE\": true,\n");
+#else
+    fprintf(json, " \"THREAD_SAFE\": false,\n");
+#endif
     fprintf(json, " \"results\": ");
     printresults_as_json(json, num_tracefiles, tracefiles, mm_stats);
     if (errors == 0) {
@@ -610,6 +659,8 @@ static trace_t *read_trace(char *tracedir, char *filename, int verbose)
     if ((trace = (trace_t *) malloc(sizeof(trace_t))) == NULL)
         unix_error("malloc 1 failed in read_trance");
         
+    trace->multiplier = 1.0;
+
     /* Read the trace file header */
     strcpy(path, tracedir);
     strcat(path, filename);
@@ -710,7 +761,7 @@ reset_heap(int tracenum)
 /*
  * eval_mm_valid - Check the mm malloc package for correctness
  */
-static int eval_mm_valid(trace_t *trace, int tracenum, range_t **ranges) 
+static int eval_mm_valid(trace_t *trace, int tracenum, range_t **ranges)
 {
     if (!reset_heap(tracenum))
         return 0;
@@ -718,7 +769,7 @@ static int eval_mm_valid(trace_t *trace, int tracenum, range_t **ranges)
     return eval_mm_valid_inner(trace, tracenum, ranges);
 }
 
-static int eval_mm_valid_inner(trace_t *trace, int tracenum, range_t **ranges) 
+static int eval_mm_valid_inner(trace_t *trace, int tracenum, range_t **ranges)
 {
     int i, j;
     int index;
@@ -734,7 +785,8 @@ static int eval_mm_valid_inner(trace_t *trace, int tracenum, range_t **ranges)
     /* Interpret each operation in the trace in order */
     for (i = 0;  i < trace->num_ops;  i++) {
         index = trace->ops[i].index;
-        size = trace->ops[i].size;
+        int rsize = (int) (trace->multiplier * trace->ops[i].size);
+        size = max(0, (int)rsize);
 
         switch (trace->ops[i].type) {
 
@@ -875,7 +927,7 @@ static int eval_mm_util(trace_t *trace, int tracenum, range_t **ranges)
 
         case ALLOC: /* mm_alloc */
             index = trace->ops[i].index;
-            size = trace->ops[i].size;
+            size = max(0, (int)(trace->multiplier * trace->ops[i].size));
 
             if ((p = mm_malloc(size)) == NULL) 
                 app_error("mm_malloc failed in eval_mm_util");
@@ -895,7 +947,7 @@ static int eval_mm_util(trace_t *trace, int tracenum, range_t **ranges)
 
         case REALLOC: /* mm_realloc */
             index = trace->ops[i].index;
-            newsize = trace->ops[i].size;
+            newsize = max(0, (int)(trace->multiplier * trace->ops[i].size));
             oldsize = trace->block_sizes[index];
 
             oldp = trace->blocks[index];
@@ -988,7 +1040,7 @@ static void eval_mm_speed_inner(void *ptr)
 
         case ALLOC: /* mm_malloc */
             index = trace->ops[i].index;
-            size = trace->ops[i].size;
+            size = max(0, (int)(trace->multiplier * trace->ops[i].size));
             if ((p = mm_malloc(size)) == NULL)
                 app_error("mm_malloc error in eval_mm_speed");
             trace->blocks[index] = p;
@@ -996,7 +1048,7 @@ static void eval_mm_speed_inner(void *ptr)
 
         case REALLOC: /* mm_realloc */
             index = trace->ops[i].index;
-            newsize = trace->ops[i].size;
+            newsize = max(0, (int)(trace->multiplier * trace->ops[i].size));
             oldp = trace->blocks[index];
             if ((newp = mm_realloc(oldp,newsize)) == NULL)
                 app_error("mm_realloc error in eval_mm_speed");
@@ -1022,14 +1074,15 @@ static void eval_mm_speed_inner(void *ptr)
  */
 static int eval_libc_valid(trace_t *trace, int tracenum)
 {
-    int i, newsize;
+    int i, newsize, size;
     char *p, *newp, *oldp;
 
     for (i = 0;  i < trace->num_ops;  i++) {
         switch (trace->ops[i].type) {
 
         case ALLOC: /* malloc */
-            if ((p = malloc(trace->ops[i].size)) == NULL) {
+            size = max(0, (int)(trace->multiplier * trace->ops[i].size));
+            if ((p = malloc(size)) == NULL) {
                 malloc_error(tracenum, i, "libc malloc failed");
                 unix_error("System message");
             }
@@ -1037,7 +1090,7 @@ static int eval_libc_valid(trace_t *trace, int tracenum)
             break;
 
         case REALLOC: /* realloc */
-            newsize = trace->ops[i].size;
+            newsize = max(0, (int)(trace->multiplier * trace->ops[i].size));
             oldp = trace->blocks[trace->ops[i].index];
             if ((newp = realloc(oldp, newsize)) == NULL) {
                 malloc_error(tracenum, i, "libc realloc failed");
@@ -1074,7 +1127,7 @@ static void eval_libc_speed(void *ptr)
         switch (trace->ops[i].type) {
         case ALLOC: /* malloc */
             index = trace->ops[i].index;
-            size = trace->ops[i].size;
+            size = max(0, (int)(trace->multiplier * trace->ops[i].size));
             if ((p = malloc(size)) == NULL)
                 unix_error("malloc failed in eval_libc_speed");
             trace->blocks[index] = p;
@@ -1082,7 +1135,7 @@ static void eval_libc_speed(void *ptr)
 
         case REALLOC: /* realloc */
             index = trace->ops[i].index;
-            newsize = trace->ops[i].size;
+            newsize = max(0, (int)(trace->multiplier * trace->ops[i].size));
             oldp = trace->blocks[index];
             if ((newp = realloc(oldp, newsize)) == NULL)
                 unix_error("realloc failed in eval_libc_speed\n");
@@ -1229,7 +1282,7 @@ void malloc_error(int tracenum, int opnum, char *msg)
  */
 static void usage(void) 
 {
-    fprintf(stderr, "Usage: mdriver [-hvVal] [-f <file>] [-t <dir>]\n");
+    fprintf(stderr, "Usage: mdriver [-shvVal] [-f <file>] [-m <t>] [-t <dir>]\n");
     fprintf(stderr, "Options\n");
     fprintf(stderr, "\t-a         Don't check the team structure.\n");
     fprintf(stderr, "\t-f <file>  Use <file> as the trace file.\n");
@@ -1240,4 +1293,6 @@ static void usage(void)
     fprintf(stderr, "\t-v         Print per-trace performance breakdowns.\n");
     fprintf(stderr, "\t-V         Print additional debug info.\n");
     fprintf(stderr, "\t-n         Don't randomize addresses.\n");
+    fprintf(stderr, "\t-s         Vary amplitude of each trace.\n");
+    fprintf(stderr, "\t-m <t>     Run with multiple threads (mdriver-ts only).\n");
 }

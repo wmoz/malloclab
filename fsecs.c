@@ -2,6 +2,7 @@
  * High-level timing wrappers
  ****************************/
 #include <stdio.h>
+#include <time.h>
 #include "fsecs.h"
 #include "fcyc.h"
 #include "clock.h"
@@ -36,6 +37,11 @@ void init_fsecs(void)
 #elif USE_GETTOD
     if (verbose)
 	printf("Measuring performance with gettimeofday().\n");
+#elif USE_CLOCK
+    struct timespec res;
+    clock_getres(CLOCK_MONOTONIC_RAW, &res);
+    if (verbose)
+	printf("Measuring performance with clock_gettime(), advertised resolution %ldns.\n", res.tv_nsec);
 #endif
 }
 
@@ -51,6 +57,8 @@ double fsecs(fsecs_test_funct f, void *argp)
     return ftimer_itimer(f, argp, 10);
 #elif USE_GETTOD
     return ftimer_gettod(f, argp, 10);
+#elif USE_CLOCK
+    return ftimer_clock(f, argp, 10);
 #endif 
 }
 
