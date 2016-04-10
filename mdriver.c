@@ -668,10 +668,15 @@ static trace_t *read_trace(char *tracedir, char *filename, int verbose)
         sprintf(msg, "Could not open %s in read_trace", path);
         unix_error(msg);
     }
-    fscanf(tracefile, "%d", &(trace->sugg_heapsize)); /* not used */
-    fscanf(tracefile, "%d", &(trace->num_ids));     
-    fscanf(tracefile, "%d", &(trace->num_ops));     
-    fscanf(tracefile, "%d", &(trace->weight));        /* not used */
+    int rc;
+    rc = fscanf(tracefile, "%d", &(trace->sugg_heapsize)); /* not used */
+    assert (rc == 1);
+    rc = fscanf(tracefile, "%d", &(trace->num_ids));     
+    assert (rc == 1);
+    rc = fscanf(tracefile, "%d", &(trace->num_ops));     
+    assert (rc == 1);
+    rc = fscanf(tracefile, "%d", &(trace->weight));        /* not used */
+    assert (rc == 1);
     
     /* We'll store each request line in the trace in this array */
     if ((trace->ops = 
@@ -694,21 +699,24 @@ static trace_t *read_trace(char *tracedir, char *filename, int verbose)
     while (fscanf(tracefile, "%s", type) != EOF) {
         switch(type[0]) {
         case 'a':
-            fscanf(tracefile, "%u %u", &index, &size);
+            rc = fscanf(tracefile, "%u %u", &index, &size);
+            assert (rc == 2);
             trace->ops[op_index].type = ALLOC;
             trace->ops[op_index].index = index;
             trace->ops[op_index].size = size;
             max_index = (index > max_index) ? index : max_index;
             break;
         case 'r':
-            fscanf(tracefile, "%u %u", &index, &size);
+            rc = fscanf(tracefile, "%u %u", &index, &size);
+            assert (rc == 2);
             trace->ops[op_index].type = REALLOC;
             trace->ops[op_index].index = index;
             trace->ops[op_index].size = size;
             max_index = (index > max_index) ? index : max_index;
             break;
         case 'f':
-            fscanf(tracefile, "%ud", &index);
+            rc = fscanf(tracefile, "%ud", &index);
+            assert (rc == 1);
             trace->ops[op_index].type = FREE;
             trace->ops[op_index].index = index;
             break;
