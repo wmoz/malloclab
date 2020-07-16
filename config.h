@@ -51,8 +51,10 @@
  * This is a base line for a single-threaded implementation, without
  * locking overhead, when clock() is used to time it.
  * This is not meaningful for the multi-threaded implementation
+ *
+ * Updated Summer 2020 for new hardware
  */
-#define AVG_LIBC_THRUPUT      21.5E6 /* 21,500 Kops/sec */
+#define AVG_LIBC_THRUPUT      31701E3 /* 31,701 Kops/sec */
 
  /* 
   * This constant determines the contributions of space utilization

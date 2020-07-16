@@ -643,7 +643,7 @@ static void clear_ranges(range_t **ranges)
  */
 static trace_t *read_trace(char *tracedir, char *filename, int verbose)
 {
-    char msg[MAXLINE];
+    char msg[MAXLINE + 100];
     FILE *tracefile;
     trace_t *trace;
     char type[MAXLINE];
@@ -665,7 +665,7 @@ static trace_t *read_trace(char *tracedir, char *filename, int verbose)
     strcpy(path, tracedir);
     strcat(path, filename);
     if ((tracefile = fopen(path, "r")) == NULL) {
-        sprintf(msg, "Could not open %s in read_trace", path);
+        snprintf(msg, sizeof msg, "Could not open %s in read_trace", path);
         unix_error(msg);
     }
     int rc;
