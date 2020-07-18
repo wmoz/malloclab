@@ -54,7 +54,7 @@
  *
  * Updated Summer 2020 for new hardware
  */
-#define AVG_LIBC_THRUPUT      31701E3 /* 31,701 Kops/sec */
+#define AVG_LIBC_THRUPUT      37000E3
 
  /* 
   * This constant determines the contributions of space utilization
@@ -64,9 +64,10 @@
 #define UTIL_WEIGHT .60
 
 /* 
- * Alignment requirement in bytes (either 4 or 8) 
+ * Alignment requirement in bytes
+ * (16 for 64-bit allocators)
  */
-#define ALIGNMENT 8
+#define ALIGNMENT 16
 
 /* 
  * Maximum heap size in bytes 

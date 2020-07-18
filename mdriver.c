@@ -16,6 +16,7 @@
 #include <float.h>
 #include <time.h>
 #include <stdint.h>
+#include <stdbool.h>
 #include <pthread.h>
 #include <sys/time.h>
 
@@ -34,7 +35,10 @@
 #define LINENUM(i) (i+5) /* cnvt trace request nums to linenums (origin 1) */
 
 /* Returns true if p is ALIGNMENT-byte aligned */
-#define IS_ALIGNED(p)  ((((unsigned int)(p)) % ALIGNMENT) == 0)
+static bool
+IS_ALIGNED(void *p) {
+    return ((uintptr_t) p) % ALIGNMENT == 0;
+}
 
 /****************************** 
  * The key compound data types 
@@ -896,7 +900,7 @@ eval_mm_valid_single(void *_args)
     }
     range_t *ranges = NULL;
     check_heap_bounds = 0;
-    int isvalid = eval_mm_valid_inner(trace, args->tracenum, &ranges);
+    intptr_t isvalid = eval_mm_valid_inner(trace, args->tracenum, &ranges);
     assert (sizeof(int) <= sizeof(void*));
     clear_ranges(&ranges);
     free_trace(trace);

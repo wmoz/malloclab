@@ -1,13 +1,22 @@
 /* 
- * Simple, 32-bit and 64-bit clean allocator based on implicit free
- * lists, first fit placement, and boundary tag coalescing, as described
- * in the CS:APP2e text. Blocks must be aligned to doubleword (8 byte) 
+ * Simple, 64-bit allocator based on implicit free lists, 
+ * first fit placement, and boundary tag coalescing, as described
+ * in the CS:APP2e text. Blocks must be aligned to 16 byte
  * boundaries. Minimum block size is 16 bytes. 
  *
  * This version is loosely based on 
- * http://csapp.cs.cmu.edu/public/ics2/code/vm/malloc/mm.c
+ * http://csapp.cs.cmu.edu/3e/ics3/code/vm/malloc/mm.c
  * but unlike the book's version, it does not use C preprocessor 
  * macros or explicit bit operations.
+ *
+ * It follows the book in counting in units of 4-byte words,
+ * but note that this is a choice (my actual solution chooses
+ * to count everything in bytes instead.)
+ *
+ * You may use this code as a starting point for your implementation
+ * if you want.
+ *
+ * Adapted for CS3214 Summer 2020 by gback
  */
 #include <stdio.h>
 #include <string.h>
@@ -19,46 +28,52 @@
 
 #include "mm.h"
 #include "memlib.h"
-
-#include "mm_ts.c"
+#include "config.h"
 
 struct boundary_tag {
     int inuse:1;        // inuse bit
     int size:31;        // size of block, in words
+                        // block size
 };
 
 /* FENCE is used for heap prologue/epilogue. */
-const struct boundary_tag FENCE = { .inuse = 1, .size = 0 };
+const struct boundary_tag FENCE = {
+    .inuse = 1,
+    .size = 0
+};
 
 /* A C struct describing the beginning of each block. 
  * For implicit lists, used and free blocks have the same 
  * structure, so one struct will suffice for this example.
- * If each block is aligned at 4 mod 8, each payload will
- * be aligned at 0 mod 8.
+ *
+ * If each block is aligned at 12 mod 16, each payload will
+ * be aligned at 0 mod 16.
  */
 struct block {
-    struct boundary_tag header; /* offset 0, at address 4 mod 8 */
-    char payload[0];            /* offset 4, at address 0 mod 8 */
+    struct boundary_tag header; /* offset 0, at address 12 mod 16 */
+    char payload[0];            /* offset 4, at address 0 mod 16 */
 };
 
-/*
- * If NEXT_FIT defined use next fit search, else use first fit search 
- */
-#define NEXT_FITx
-
 /* Basic constants and macros */
-#define WSIZE       4       /* Word and header/footer size (bytes) */
-#define DSIZE       8       /* Doubleword size (bytes) */
-#define MIN_BLOCK_SIZE_WORDS 4 /* Minimum block size in words */
+#define WSIZE       sizeof(struct boundary_tag)  /* Word and header/footer size (bytes) */
+#define MIN_BLOCK_SIZE_WORDS 4  /* Minimum block size in words */
 #define CHUNKSIZE  (1<<10)  /* Extend heap by this amount (words) */
 
-#define MAX(x, y) ((x) > (y)? (x) : (y))  
+static inline size_t max(size_t x, size_t y) {
+    return x > y ? x : y;
+}
+
+static size_t align(size_t size) {
+  return (size + ALIGNMENT - 1) & ~(ALIGNMENT - 1);
+}
+
+static bool is_aligned(size_t size) __attribute__((__unused__));
+static bool is_aligned(size_t size) {
+  return size % ALIGNMENT == 0;
+}
 
 /* Global variables */
 static struct block *heap_listp = 0;  /* Pointer to first block */  
-#ifdef NEXT_FIT
-static struct block *rover;           /* Next fit rover */
-#endif
 
 /* Function prototypes for internal helper routines */
 static struct block *extend_heap(size_t words);
@@ -87,19 +102,19 @@ static size_t blk_size(struct block *blk) {
 static struct block *prev_blk(struct block *blk) {
     struct boundary_tag *prevfooter = prev_blk_footer(blk);
     assert(prevfooter->size != 0);
-    return (struct block *)((size_t *)blk - prevfooter->size);
+    return (struct block *)((void *)blk - WSIZE * prevfooter->size);
 }
 
 /* Given a block, obtain pointer to next block.
    Not meaningful for right-most block. */
 static struct block *next_blk(struct block *blk) {
     assert(blk_size(blk) != 0);
-    return (struct block *)((size_t *)blk + blk->header.size);
+    return (struct block *)((void *)blk + WSIZE * blk->header.size);
 }
 
 /* Given a block, obtain its footer boundary tag */
 static struct boundary_tag * get_footer(struct block *blk) {
-    return (void *)((size_t *)blk + blk->header.size) 
+    return (void *)((void *)blk + WSIZE * blk->header.size)
                    - sizeof(struct boundary_tag);
 }
 
@@ -125,8 +140,10 @@ static void mark_block_free(struct block *blk, int size) {
  */
 int mm_init(void) 
 {
+    assert (offsetof(struct block, payload) == 4);
+    assert (sizeof(struct boundary_tag) == 4);
     /* Create the initial empty heap */
-    struct boundary_tag * initial = mem_sbrk(2 * sizeof(struct boundary_tag));
+    struct boundary_tag * initial = mem_sbrk(4 * sizeof(struct boundary_tag));
     if (initial == (void *)-1)
         return -1;
 
@@ -134,16 +151,12 @@ int mm_init(void)
      * Rather than placing a min-sized prologue block at the beginning
      * of the heap, we simply place two fences.
      * The consequence is that coalesce() must call prev_blk_footer()
-     * and not prev_blk() - prev_blk() cannot be called on the left-most
-     * block.
+     * and not prev_blk() because prev_blk() cannot be called on the
+     * left-most block.
      */
-    initial[0] = FENCE;                     /* Prologue footer */
-    heap_listp = (struct block *)&initial[1];
-    initial[1] = FENCE;                     /* Epilogue header */
-
-#ifdef NEXT_FIT
-    rover = heap_listp;
-#endif
+    initial[2] = FENCE;                     /* Prologue footer */
+    heap_listp = (struct block *)&initial[3];
+    initial[3] = FENCE;                     /* Epilogue header */
 
     /* Extend the empty heap with a free block of CHUNKSIZE bytes */
     if (extend_heap(CHUNKSIZE) == NULL) 
@@ -156,11 +169,9 @@ int mm_init(void)
  */
 void *mm_malloc(size_t size)
 {
-    size_t awords;      /* Adjusted block size in words */
-    size_t extendwords;  /* Amount to extend heap if no fit */
     struct block *bp;      
 
-    if (heap_listp == 0){
+    if (heap_listp == 0) {
         mm_init();
     }
     /* Ignore spurious requests */
@@ -169,9 +180,8 @@ void *mm_malloc(size_t size)
 
     /* Adjust block size to include overhead and alignment reqs. */
     size += 2 * sizeof(struct boundary_tag);    /* account for tags */
-    size = (size + DSIZE - 1) & ~(DSIZE - 1);   /* align to double word */
-    awords = MAX(MIN_BLOCK_SIZE_WORDS, size/WSIZE);
-                                                /* respect minimum size */
+    /* Adjusted block size in words */
+    size_t awords = max(MIN_BLOCK_SIZE_WORDS, align(size)/WSIZE); /* respect minimum size */
 
     /* Search the free list for a fit */
     if ((bp = find_fit(awords)) != NULL) {
@@ -180,9 +190,10 @@ void *mm_malloc(size_t size)
     }
 
     /* No fit found. Get more memory and place the block */
-    extendwords = MAX(awords,CHUNKSIZE);
+    size_t extendwords = max(awords,CHUNKSIZE); /* Amount to extend heap if no fit */
     if ((bp = extend_heap(extendwords)) == NULL)  
         return NULL;
+
     place(bp, awords);
     return bp->payload;
 } 
@@ -192,14 +203,12 @@ void *mm_malloc(size_t size)
  */
 void mm_free(void *bp)
 {
+    assert (heap_listp != 0);       // assert that mm_init was called
     if (bp == 0) 
         return;
 
     /* Find block from user pointer */
     struct block *blk = bp - offsetof(struct block, payload);
-    if (heap_listp == 0) {
-        mm_init();
-    }
 
     mark_block_free(blk, blk_size(blk));
     coalesce(blk);
@@ -210,34 +219,32 @@ void mm_free(void *bp)
  */
 static struct block *coalesce(struct block *bp) 
 {
-    bool prev_alloc = prev_blk_footer(bp)->inuse;
-    bool next_alloc = ! blk_free(next_blk(bp));
+    bool prev_alloc = prev_blk_footer(bp)->inuse;   /* is previous block allocated? */
+    bool next_alloc = ! blk_free(next_blk(bp));     /* is next block allocated? */
     size_t size = blk_size(bp);
 
     if (prev_alloc && next_alloc) {            /* Case 1 */
+        // both are allocated, nothing to coalesce
         return bp;
     }
 
     else if (prev_alloc && !next_alloc) {      /* Case 2 */
+        // combine this block and next block by extending it
         mark_block_free(bp, size + blk_size(next_blk(bp)));
     }
 
     else if (!prev_alloc && next_alloc) {      /* Case 3 */
+        // combine previous and this block by extending previous
         bp = prev_blk(bp);
         mark_block_free(bp, size + blk_size(bp));
     }
 
     else {                                     /* Case 4 */
+        // combine all previous, this, and next block into one
         mark_block_free(prev_blk(bp), 
                         size + blk_size(next_blk(bp)) + blk_size(prev_blk(bp)));
         bp = prev_blk(bp);
     }
-#ifdef NEXT_FIT
-    /* Make sure the rover isn't pointing into the free block */
-    /* that we just coalesced */
-    if ((rover > bp) && (rover < next_blk(bp))) 
-        rover = bp;
-#endif
     return bp;
 }
 
@@ -246,31 +253,28 @@ static struct block *coalesce(struct block *bp)
  */
 void *mm_realloc(void *ptr, size_t size)
 {
-    size_t oldsize;
-    void *newptr;
-
     /* If size == 0 then this is just free, and we return NULL. */
-    if(size == 0) {
+    if (size == 0) {
         mm_free(ptr);
         return 0;
     }
 
     /* If oldptr is NULL, then this is just malloc. */
-    if(ptr == NULL) {
+    if (ptr == NULL) {
         return mm_malloc(size);
     }
 
-    newptr = mm_malloc(size);
+    void *newptr = mm_malloc(size);
 
     /* If realloc() fails the original block is left untouched  */
-    if(!newptr) {
+    if (!newptr) {
         return 0;
     }
 
     /* Copy the old data. */
     struct block *oldblock = ptr - offsetof(struct block, payload);
-    oldsize = blk_size(oldblock) * WSIZE;
-    if(size < oldsize) oldsize = size;
+    size_t oldsize = blk_size(oldblock) * WSIZE;
+    if (size < oldsize) oldsize = size;
     memcpy(newptr, ptr, oldsize);
 
     /* Free the old block. */
@@ -282,7 +286,7 @@ void *mm_realloc(void *ptr, size_t size)
 /* 
  * checkheap - We don't check anything right now. 
  */
-void mm_checkheap(int verbose)  
+void mm_checkheap(int verbose)
 { 
 }
 
@@ -295,15 +299,13 @@ void mm_checkheap(int verbose)
  */
 static struct block *extend_heap(size_t words) 
 {
-    void *bp;
+    void *bp = mem_sbrk(words * WSIZE);
 
-    /* Allocate an even number of words to maintain alignment */
-    words = (words + 1) & ~1;
-    if ((long)(bp = mem_sbrk(words * WSIZE)) == -1)  
+    if ((intptr_t) bp == -1)
         return NULL;
 
     /* Initialize free block header/footer and the epilogue header.
-     * Note that we scoop up the previous epilogue here. */
+     * Note that we overwrite the previous epilogue here. */
     struct block * blk = bp - sizeof(FENCE);
     mark_block_free(blk, words);
     next_blk(blk)->header = FENCE;
@@ -335,33 +337,13 @@ static void place(struct block *bp, size_t asize)
  */
 static struct block *find_fit(size_t asize)
 {
-
-#ifdef NEXT_FIT 
-    /* Next fit search */
-    struct block *oldrover = rover;
-
-    /* Search from the rover to the end of list */
-    for ( ; blk_size(rover) > 0; rover = next_blk(rover))
-        if (blk_free(rover) && (asize <= blk_size(rover)))
-            return rover;
-
-    /* search from start of list to old rover */
-    for (rover = heap_listp; rover < oldrover; rover = next_blk(rover))
-        if (blk_free(rover) && (asize <= blk_size(rover)))
-            return rover;
-
-    return NULL;  /* no fit found */
-#else 
     /* First fit search */
-    struct block *bp;
-
-    for (bp = heap_listp; blk_size(bp) > 0; bp = next_blk(bp)) {
+    for (struct block * bp = heap_listp; blk_size(bp) > 0; bp = next_blk(bp)) {
         if (blk_free(bp) && asize <= blk_size(bp)) {
             return bp;
         }
     }
     return NULL; /* No fit */
-#endif
 }
 
 team_t team = {
