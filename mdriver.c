@@ -674,13 +674,13 @@ static trace_t *read_trace(char *tracedir, char *filename, int verbose)
     }
     int rc;
     rc = fscanf(tracefile, "%d", &(trace->sugg_heapsize)); /* not used */
-    assert (rc == 1);
+    if (rc != 1) abort();
     rc = fscanf(tracefile, "%d", &(trace->num_ids));     
-    assert (rc == 1);
+    if (rc != 1) abort();
     rc = fscanf(tracefile, "%d", &(trace->num_ops));     
-    assert (rc == 1);
+    if (rc != 1) abort();
     rc = fscanf(tracefile, "%d", &(trace->weight));        /* not used */
-    assert (rc == 1);
+    if (rc != 1) abort();
     
     /* We'll store each request line in the trace in this array */
     if ((trace->ops = 

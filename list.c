@@ -344,6 +344,10 @@ list_reverse (struct list *list)
     }
 }
 
+static bool
+is_sorted (struct list_elem *a, struct list_elem *b,
+           list_less_func *less, void *aux) __attribute__((__unused__));
+
 /* Returns true only if the list elements A through B (exclusive)
    are in order according to LESS given auxiliary data AUX. */
 static bool
