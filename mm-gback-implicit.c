@@ -114,7 +114,7 @@ static struct block *next_blk(struct block *blk) {
 
 /* Given a block, obtain its footer boundary tag */
 static struct boundary_tag * get_footer(struct block *blk) {
-    return (void *)((void *)blk + WSIZE * blk->header.size)
+    return ((void *)blk + WSIZE * blk->header.size)
                    - sizeof(struct boundary_tag);
 }
 
@@ -171,9 +171,6 @@ void *mm_malloc(size_t size)
 {
     struct block *bp;      
 
-    if (heap_listp == 0) {
-        mm_init();
-    }
     /* Ignore spurious requests */
     if (size == 0)
         return NULL;
