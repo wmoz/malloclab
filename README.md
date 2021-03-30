@@ -1,4 +1,3 @@
-
 # Heap Inspector
 
 The specification for Project 3 is on the course website. This README describes the specification for a brand new tool that can aid in the development of the malloclab project.
@@ -119,6 +118,7 @@ left, right, n, space	Step to the next or previous heap activity
 up, down		Change the heap memory location
 page up, page down	Jump to the beginning or end of the heap memory location
 j			Jump to the current pointer
+t			Open trace file menu
 ```
 Here is what the different coloring indicates in this tool:
 ```
