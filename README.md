@@ -158,3 +158,25 @@ Here's an example of this in action. In the screenshot below, there are a few in
 
 ### About Jump (``j``)
 The ``j`` command simply takes the user to the pointer described by the current heap activity (if applicable). For instance, on a successful return from ``mm_malloc``, the user can press ``j`` to jump their cursor to wherever the current memory write is.
+
+## Trace Executor
+The trace executor tool (which can be launched using the ``trace`` command in the main REPL) is used to execute a trace file.
+
+![Selecting a trace](images/help6.png)
+
+After selecting a trace, you will be greeted with a menu to advance the trace. You should be able to simply advance the trace using the right arrow key, ``n``, or the space key.
+
+You can also jump right into the memory viewing tool for convenience without going to the main menu.
+
+![Executing the trace file](images/help7.png)
+
+## State Diagram
+Recall that there are three main states that the heap inspector can be in. It can either be in the main REPL interface, the memory viewer, or the trace file executor.
+
+For convenience, we've added seamless transitions between all of these tools. From the main menu, the memory viewer can be accessed with ``view`` and the trace executor can be accessed with ``trace``.
+
+From the memory viewer, you can access the trace file executor with ``t`` and the main menu with ``m``.
+
+From the trace executor, you can access the memory viewer with ``v`` and the main menu with ``m``.
+
+![State diagram](images/states.png)
