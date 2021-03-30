@@ -53,8 +53,9 @@
  * This is not meaningful for the multi-threaded implementation
  *
  * Updated Summer 2020 for new hardware
+ * Changed Spring 2021 to reduce required tuning
  */
-#define AVG_LIBC_THRUPUT      37000E3
+#define AVG_LIBC_THRUPUT      30000E3
 
  /* 
   * This constant determines the contributions of space utilization
