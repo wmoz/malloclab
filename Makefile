@@ -17,7 +17,7 @@ GBACK_IMPL_OBJS = $(SHARED_OBJS) mm-gback-implicit.o
 
 # Variables used for instrumentation purposes
 INST_BUILD_LOC = /home/courses/cs3214/bin/heap-visualizer/processing/build
-CLANGFLAGS = -O3 -ggdb3 -emit-llvm -c -fPIC
+CLANGFLAGS = -O3 -ggdb3 -emit-llvm -c -fPIC -Wno-address-of-packed-member
 LLCFLAGS = --relocation-model=pic -O3 -filetype=obj
 
 all: mdriver libMallocInstrumented.so
