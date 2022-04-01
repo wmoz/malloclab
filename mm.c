@@ -18,6 +18,9 @@ team_t team = {
     "wmoz"
 };
 
+//points to the start of the heap
+static char* heap; 
+
 /**
  * @brief Before calling mm malloc mm realloc or mm free, the application program
  * (i.e., the trace-driven driver program that you will use to evaluate your implementation)
@@ -28,7 +31,9 @@ team_t team = {
  */
 extern int mm_init (void)
 {
-    if (mem_sbrk(4) == NULL) //initializing the heap with size 4
+    mem_init(); //what value should be used??
+    heap = mem_sbrk(4); //initializing the heap with size 4
+    if (heap == NULL) 
     {
         return -1;
     }
