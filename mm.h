@@ -1,10 +1,15 @@
 #include <stdio.h>
+#include "list.h"
 
+#define EXPLICIT_LIST 1
+#define IMPLICIT_LIST 2
+#define LIST_POLICY  EXPLICIT_LIST
 extern int mm_init (void);
 extern void *mm_malloc (size_t size);
 extern void mm_free (void *ptr);
 extern void *mm_realloc(void *ptr, size_t size);
 
+struct list free_mem;
 
 /* 
  * Students work in teams of one or two.  Teams enter their team name, 

@@ -28,12 +28,12 @@ mdriver: $(OBJS)
 libMallocInstrumented.so: mm.c list.c memlib.c mallocanalysis.c
 	# This compiles and instruments mm.c
 	clang $(CLANGFLAGS) mm.c -o mm.bc
-	LD_LIBRARY_PATH=$(INST_BUILD_LOC)/lib opt -load libLLVMMallocInjectorPass.so -mallocinjector mm.bc -o mm-instrumented.bc
+	LD_LIBRARY_PATH=$(INST_BUILD_LOC)/lib opt -enable-new-pm=0 -load libLLVMMallocInjectorPass.so -mallocinjector mm.bc -o mm-instrumented.bc
 	llc $(LLCFLAGS) mm-instrumented.bc -o mm-instrumented.o
 
 	# This compiles and instruments list.c
 	clang $(CLANGFLAGS) list.c -o list.bc
-	LD_LIBRARY_PATH=$(INST_BUILD_LOC)/lib opt -load libLLVMMallocInjectorPass.so -mallocinjector list.bc -o list-instrumented.bc
+	LD_LIBRARY_PATH=$(INST_BUILD_LOC)/lib opt -enable-new-pm=0 -load libLLVMMallocInjectorPass.so -mallocinjector list.bc -o list-instrumented.bc
 	llc $(LLCFLAGS) list-instrumented.bc -o list-instrumented.o
 
 	# Now, simply build memlib and mallocanalysis
