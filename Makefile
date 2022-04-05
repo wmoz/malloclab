@@ -8,7 +8,7 @@ CC = gcc
 # for benchmarking - this turns asserts off.
 CFLAGS = -Wall -O3 -Werror -pthread -DNDEBUG=1
 # for debugging, with asserts on
-#CFLAGS = -Wall -g -Werror -pthread
+# CFLAGS = -Wall -g -Werror -pthread
 
 SHARED_OBJS = mdriver.o memlib.o fsecs.o fcyc.o clock.o ftimer.o list.o
 OBJS = $(SHARED_OBJS) mm.o

@@ -53,7 +53,6 @@ const struct boundary_tag FENCE = {
 struct block {
     struct boundary_tag header; /* offset 0, at address 12 mod 16 */
     char payload[0];            /* offset 4, at address 0 mod 16 */
-    struct list_elem elem;
     
 };
 
@@ -61,6 +60,8 @@ struct block {
 #define WSIZE       sizeof(struct boundary_tag)  /* Word and header/footer size (bytes) */
 #define MIN_BLOCK_SIZE_WORDS 8  /* Minimum block size in words */
 #define CHUNKSIZE  (1<<10)  /* Extend heap by this amount (words) */
+#define LIST_ELEM_OFFSET (size_t)&((struct list_elem*)((struct block*)0)->payload)->next
+#define LIST_ELEM_TO_BLOCK(LIST_ELEM) ((struct block *) ((uint8_t *) &(LIST_ELEM)->next - LIST_ELEM_OFFSET));
 
 static inline size_t max(size_t x, size_t y) {
     return x > y ? x : y;
@@ -222,7 +223,7 @@ void mm_free(void *bp)
 
     mark_block_free(blk, blk_size(blk));
     #if(LIST_POLICY == EXPLICIT_LIST)
-    list_push_back(&free_mem, &blk->elem);
+    list_push_back(&free_mem, (struct list_elem*)blk->payload);
     #endif
     coalesce(blk);
 }
@@ -244,7 +245,7 @@ static struct block *coalesce(struct block *bp)
     else if (prev_alloc && !next_alloc) {      /* Case 2 */
         // combine this block and next block by extending it
         #if(LIST_POLICY ==EXPLICIT_LIST)
-        list_remove(&next_blk(bp)->elem);
+        list_remove((struct list_elem*)next_blk(bp)->payload);
         #endif
         mark_block_free(bp, size + blk_size(next_blk(bp)));
         
@@ -253,7 +254,7 @@ static struct block *coalesce(struct block *bp)
     else if (!prev_alloc && next_alloc) {      /* Case 3 */
         // combine previous and this block by extending previous
          #if(LIST_POLICY ==EXPLICIT_LIST)
-        list_remove(&bp->elem);
+        list_remove((struct list_elem*)bp->payload);
         #endif
         bp = prev_blk(bp);
         mark_block_free(bp, size + blk_size(bp));
@@ -267,8 +268,8 @@ static struct block *coalesce(struct block *bp)
                         size + blk_size(next_blk(bp)) + blk_size(prev_blk(bp)));
 
         #if(LIST_POLICY ==EXPLICIT_LIST)
-        list_remove(&bp->elem);
-        list_remove(&next_blk(bp)->elem);
+        list_remove((struct list_elem*)bp->payload);
+        list_remove((struct list_elem*)next_blk(bp)->payload);
         #endif
 
         bp = prev_blk(bp);
@@ -339,7 +340,7 @@ static struct block *extend_heap(size_t words)
     struct block * blk = bp - sizeof(FENCE);
     mark_block_free(blk, words);
     #if(LIST_POLICY == EXPLICIT_LIST)
-    list_push_back(&free_mem,&blk->elem);
+    list_push_back(&free_mem,(struct list_elem*)blk->payload);
     #endif
 
 
@@ -358,12 +359,12 @@ static void place(struct block *bp, size_t asize)
 {
     size_t csize = blk_size(bp);
     #if(LIST_POLICY == EXPLICIT_LIST )
-    list_remove(&bp->elem);
+    list_remove((struct list_elem*)bp->payload);
     if ((csize - asize) >= MIN_BLOCK_SIZE_WORDS) { 
         mark_block_used(bp, asize);
         bp = next_blk(bp);
         mark_block_free(bp, csize-asize);
-        list_push_back(&free_mem, &bp->elem);
+        list_push_back(&free_mem, (struct list_elem*)bp->payload);
     }
     else 
     { 
@@ -406,14 +407,16 @@ static struct block *find_fit(size_t asize)
     struct list_elem *e = list_begin(&free_mem);
     for (; e != list_end(&free_mem); e = list_next(e))
     {
-        struct block *bp = list_entry(e,struct block,elem);
+        struct block *bp = LIST_ELEM_TO_BLOCK(e);
+      
         if (blk_free(bp) && asize <= blk_size(bp)) {
             return bp;
         }
     }
     #endif
-    return NULL;
+    
      /* No fit */
+     return NULL;
 }
 
 team_t team = {
