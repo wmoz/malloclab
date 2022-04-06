@@ -43,6 +43,13 @@ const struct boundary_tag FENCE = {
     .size = 0
 };
 
+/* FreeList struct used to store the free blocks */
+struct freelist
+{
+    struct list list;
+    size_t size;
+}
+
 /* A C struct describing the beginning of each block. 
  * For implicit lists, used and free blocks have the same 
  * structure, so one struct will suffice for this example.
@@ -62,6 +69,8 @@ struct block {
 #define CHUNKSIZE  (1<<10)  /* Extend heap by this amount (words) */
 #define LIST_ELEM_OFFSET (size_t)&((struct list_elem*)((struct block*)0)->payload)->next
 #define LIST_ELEM_TO_BLOCK(LIST_ELEM) ((struct block *) ((uint8_t *) &(LIST_ELEM)->next - LIST_ELEM_OFFSET));
+#define NUM_LISTS 1 /* will start of as 1 just to make sure the free list works and will be changed later to 7 */
+                    /* a helper function will be used to decide where the free block will be added */
 
 static inline size_t max(size_t x, size_t y) {
     return x > y ? x : y;
@@ -78,6 +87,15 @@ static bool is_aligned(size_t size) {
 
 /* Global variables */
 static struct block *heap_listp = 0;  /* Pointer to first block */  
+struct freelist block_list[NUM_LISTS]; /* Free block list */
+
+/**
+ * @brief takes a freeblock and decides where it should be added
+ * in the list according to its size
+ * 
+ * @param freeblock the block that is free to be added in the list
+ */
+static void add_freeblock(struct block freeblock);
 
 /* Function prototypes for internal helper routines */
 static struct block *extend_heap(size_t words);
@@ -165,6 +183,9 @@ int mm_init(void)
     initial[2] = FENCE;                     /* Prologue footer */
     heap_listp = (struct block *)&initial[3];
     initial[3] = FENCE;                     /* Epilogue header */
+
+    /* the freeblock should be added here to the freeblock list */
+    //TODO
 
     /* Extend the empty heap with a free block of CHUNKSIZE bytes */
     if (extend_heap(CHUNKSIZE) == NULL) 
@@ -421,13 +442,13 @@ static struct block *find_fit(size_t asize)
 
 team_t team = {
     /* Team name */
-    "Sample allocator using implicit lists",
+    "A7A?",
     /* First member's full name */
-    "Godmar Back",
-    "gback@cs.vt.edu",
+    "Omar Elgeoushy",
+    "omarelgeoushy@vt.edu",
     /* Second member's full name (leave blank if none) */
-    "",
-    "",
+    "Walid Zeineldin",
+    "wmoz@vt.edu",
 };
 
 
