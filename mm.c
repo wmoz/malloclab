@@ -48,7 +48,7 @@ struct freelist
 {
     struct list list;
     size_t size;
-}
+};
 
 /* A C struct describing the beginning of each block. 
  * For implicit lists, used and free blocks have the same 
