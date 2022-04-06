@@ -59,15 +59,12 @@ struct freelist
  */
 struct block {
     struct boundary_tag header; /* offset 0, at address 12 mod 16 */
-    char payload[0];            /* offset 4, at address 0 mod 16 */
-    
-    
+    char payload[0];            /* offset 4, at address 0 mod 16 */ 
 };
+
 struct free_block {
     struct boundary_tag header; /* offset 0, at address 12 mod 16 */
     struct list_elem elem;
-    
-    
 };
 
 /* Basic constants and macros */
@@ -92,15 +89,25 @@ static bool is_aligned(size_t size) {
 
 /* Global variables */
 static struct block *heap_listp = 0;  /* Pointer to first block */  
-struct freelist block_list[NUM_LISTS]; /* Free block list */
+struct freelist freeblock_list[NUM_LISTS]; /* Free block list */
 
 /**
  * @brief takes a freeblock and decides where it should be added
  * in the list according to its size
  * 
  * @param freeblock the block that is free to be added in the list
+ * 
+ * @return an int that represents the corresponding list
  */
-static void add_freeblock(struct block freeblock);
+static int get_freelist(struct free_block* freeblock) { //convert this to if 
+    for (int i = 0; i < NUM_LISTS; i++)
+    {
+        if (freeblock->header.size <= freeblock_list[i].size) {
+            return i;
+        }
+    }
+    return -1;
+}
 
 /* Function prototypes for internal helper routines */
 static struct block *extend_heap(size_t words);
@@ -189,8 +196,17 @@ int mm_init(void)
     heap_listp = (struct block *)&initial[3];
     initial[3] = FENCE;                     /* Epilogue header */
 
-    /* the freeblock should be added here to the freeblock list */
-    //TODO
+    for (int i = 0; i < NUM_LISTS; i++)
+    {
+        list_init(&freeblock_list[i].list);
+        if (i == 0)
+        {
+            freeblock_list->size = 9999;
+        }
+        // else if () {
+        //     freeblock_list->size = 9999;
+        // }
+    }
 
     /* Extend the empty heap with a free block of CHUNKSIZE bytes */
     if (extend_heap(CHUNKSIZE) == NULL) 
@@ -249,7 +265,9 @@ void mm_free(void *bp)
 
     mark_block_free(blk, blk_size(blk));
     #if(LIST_POLICY == EXPLICIT_LIST)
-    list_push_back(&free_mem, &((struct free_block*)blk)->elem);
+    // list_push_back(&free_mem, &((struct free_block*)blk)->elem);
+    struct free_block * newblk = ((struct free_block*)blk);
+    list_push_back(&freeblock_list[get_freelist(newblk)].list, &newblk->elem);
     #endif
     coalesce(blk);
 }
@@ -366,7 +384,9 @@ static struct block *extend_heap(size_t words)
     struct block * blk = bp - sizeof(FENCE);
     mark_block_free(blk, words);
     #if(LIST_POLICY == EXPLICIT_LIST)
-    list_push_back(&free_mem,&((struct free_block*)blk)->elem);
+    // list_push_back(&free_mem,&((struct free_block*)blk)->elem);
+    struct free_block * newblk = ((struct free_block*)blk);
+    list_push_back(&freeblock_list[get_freelist(newblk)].list, &newblk->elem);
     #endif
 
 
