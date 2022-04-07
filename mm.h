@@ -1,8 +1,10 @@
 #include <stdio.h>
 #include "list.h"
 
-#define EXPLICIT_LIST 1
-#define IMPLICIT_LIST 2
+#define IMPLICIT_LIST 1
+#define EXPLICIT_LIST 2
+#define SEG_LIST      3
+
 #define LIST_POLICY  EXPLICIT_LIST
 extern int mm_init (void);
 extern void *mm_malloc (size_t size);

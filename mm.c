@@ -91,6 +91,7 @@ static bool is_aligned(size_t size) {
 static struct block *heap_listp = 0;  /* Pointer to first block */  
 struct freelist freeblock_list[NUM_LISTS]; /* Free block list */
 
+#if(LIST_POLICY == SEG_LIST)
 /**
  * @brief takes a freeblock and decides where it should be added
  * in the list according to its size
@@ -108,6 +109,7 @@ static int get_freelist(size_t bsize) { //convert this to if // struct free_bloc
     }
     return -1;
 }
+#endif
 
 /* Function prototypes for internal helper routines */
 static struct block *extend_heap(size_t words);
@@ -201,19 +203,19 @@ int mm_init(void)
         list_init(&freeblock_list[i].list);
         if (i == 0)
         {
-            freeblock_list->size = 50;
+            freeblock_list[i].size = 50;
         }
         else if (i == 1) {
-            freeblock_list->size = 100;
+            freeblock_list[i].size = 100;
         }
         else if (i == 2) {
-            freeblock_list->size = 500;
+            freeblock_list[i].size = 500;
         }
         else if (i == 3) {
-            freeblock_list->size = 1000;
+            freeblock_list[i].size = 1000;
         }
         else if (i == 4) {
-            freeblock_list->size = 99999999;
+            freeblock_list[i].size = 99999999;
         }
     }
 
@@ -238,7 +240,7 @@ void *mm_malloc(size_t size)
     #if(LIST_POLICY == IMPLICIT_LIST)
     size += 2 * sizeof(struct boundary_tag);    /* account for tags */
     #endif
-    #if(LIST_POLICY == EXPLICIT_LIST)
+    #if(LIST_POLICY == EXPLICIT_LIST | SEG_LIST)
     size += 2 * sizeof(struct boundary_tag);    /* account for tags  */ //no need list_elem??
     #endif
     /* Adjusted block size in words */
@@ -274,7 +276,10 @@ void mm_free(void *bp)
 
     mark_block_free(blk, blk_size(blk));
     #if(LIST_POLICY == EXPLICIT_LIST)
-    // list_push_back(&free_mem, &((struct free_block*)blk)->elem);
+    list_push_back(&free_mem, &((struct free_block*)blk)->elem);
+    #endif
+
+    #if(LIST_POLICY == SEG_LIST)
     struct free_block * newblk = ((struct free_block*)blk);
     int list_index = get_freelist(newblk->header.size);
     list_push_back(&freeblock_list[list_index].list, &newblk->elem); //get_freelist(newblk)].list
@@ -298,7 +303,7 @@ static struct block *coalesce(struct block *bp)
 
     else if (prev_alloc && !next_alloc) {      /* Case 2 */
         // combine this block and next block by extending it
-        #if(LIST_POLICY ==EXPLICIT_LIST)
+        #if(LIST_POLICY ==EXPLICIT_LIST || SEG_LIST)
         list_remove(&((struct free_block*)next_blk(bp))->elem);
         #endif
         mark_block_free(bp, size + blk_size(next_blk(bp)));
@@ -307,7 +312,7 @@ static struct block *coalesce(struct block *bp)
 
     else if (!prev_alloc && next_alloc) {      /* Case 3 */
         // combine previous and this block by extending previous
-         #if(LIST_POLICY ==EXPLICIT_LIST)
+         #if(LIST_POLICY ==EXPLICIT_LIST || SEG_LIST)
         list_remove(&((struct free_block*)bp)->elem);
         #endif
         bp = prev_blk(bp);
@@ -321,7 +326,7 @@ static struct block *coalesce(struct block *bp)
         mark_block_free(prev_blk(bp), 
                         size + blk_size(next_blk(bp)) + blk_size(prev_blk(bp)));
 
-        #if(LIST_POLICY ==EXPLICIT_LIST)
+        #if(LIST_POLICY ==EXPLICIT_LIST || SEG_LIST)
         list_remove(&((struct free_block*)bp)->elem);
         list_remove(&((struct free_block*)next_blk(bp))->elem);
         #endif
@@ -394,6 +399,10 @@ static struct block *extend_heap(size_t words)
     struct block * blk = bp - sizeof(FENCE);
     mark_block_free(blk, words);
     #if(LIST_POLICY == EXPLICIT_LIST)
+    list_push_back(&free_mem,&((struct free_block*)blk)->elem);
+    #endif
+
+    #if(LIST_POLICY == SEG_LIST)
     // list_push_back(&free_mem,&((struct free_block*)blk)->elem);
     struct free_block * newblk = ((struct free_block*)blk);
     int list_index = get_freelist(newblk->header.size);
@@ -415,7 +424,7 @@ static struct block *extend_heap(size_t words)
 static struct block* place(struct block *bp, size_t asize)
 {
     size_t csize = blk_size(bp);
-    #if(LIST_POLICY == EXPLICIT_LIST )
+    #if(LIST_POLICY == EXPLICIT_LIST || SEG_LIST )
     
     if ((csize - asize) >= MIN_BLOCK_SIZE_WORDS) { 
         mark_block_free(bp, csize-asize);
@@ -463,6 +472,18 @@ static struct block *find_fit(size_t asize)
     }
     #endif
     #if(LIST_POLICY == EXPLICIT_LIST)
+
+    struct list_elem *e = list_begin(&free_mem);
+    for (; e != list_end(&free_mem); e = list_next(e))
+    {
+        struct free_block *bp = list_entry(e,struct free_block,elem);
+        if (blk_free((struct block*)bp) && asize <= blk_size((struct block*)bp)) {
+            return (struct block*)bp;
+        }
+    }
+    #endif
+
+    #if(LIST_POLICY == SEG_LIST)
 
     int list_index = get_freelist(asize);
     struct list_elem *e = list_begin(&freeblock_list[list_index].list);
