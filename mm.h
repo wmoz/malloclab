@@ -5,7 +5,7 @@
 #define EXPLICIT_LIST 2
 #define SEG_LIST      3
 
-#define LIST_POLICY  EXPLICIT_LIST
+#define LIST_POLICY  SEG_LIST
 extern int mm_init (void);
 extern void *mm_malloc (size_t size);
 extern void mm_free (void *ptr);
