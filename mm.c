@@ -123,6 +123,7 @@ static struct block *extend_heap(size_t words);
 static struct block* place(struct block *bp, size_t asize);
 static struct block *find_fit(size_t asize);
 static struct block *coalesce(struct block *bp);
+struct block* realloc_place(struct block* blk, size_t word_num);
 // static void mm_checkheap(int verbose);
 
 /* Given a block, obtain previous's block footer.
@@ -415,6 +416,17 @@ void *mm_realloc(void *ptr, size_t size)
         return mm_malloc(size);
     }
 
+    #if(LIST_POLICY == SEG_LIST)
+    size += 2 * sizeof(struct boundary_tag);    /* account for tags  */ 
+     /* Adjusted block size in words */
+    size_t awords = max(MIN_BLOCK_SIZE_WORDS, align(size)/WSIZE); /* respect minimum size */
+
+    struct block *blk = ptr - offsetof(struct block, payload);
+    blk = realloc_place(blk,awords);
+    if(blk != NULL) return blk->payload;
+    #endif
+   
+
     void *newptr = mm_malloc(size);
 
     /* If realloc() fails the original block is left untouched  */
@@ -432,6 +444,51 @@ void *mm_realloc(void *ptr, size_t size)
     mm_free(ptr);
 
     return newptr;
+}
+
+struct block* realloc_place(struct block* blk, size_t word_num)
+{
+    
+    bool next_alloc = !blk_free(next_blk(blk)); 
+    bool prev_alloc = prev_blk_footer(blk)->inuse;   /* is previous block allocated? */
+    size_t add_size = word_num -blk_size(blk);
+
+    if(!next_alloc) //CASE 2 next is free
+    {
+        struct block *ne_blk = next_blk(blk);
+        size_t ne_size = blk_size(ne_blk);
+        if(ne_size > add_size) //next block size is big enough to take the addition
+        {
+            if ((ne_size -add_size) >= MIN_BLOCK_SIZE_WORDS) 
+            { 
+                list_remove(&((struct free_block*)ne_blk)->elem);
+                mark_block_used(blk, word_num);
+                ne_blk = next_blk(blk);
+                
+                
+                mark_block_free(ne_blk, ne_size-add_size);
+                
+                int index = get_freelist(ne_size-add_size);
+                list_push_back(&freeblock_list[index].list, &((struct free_block*)ne_blk)->elem);
+            
+            
+            }
+            else 
+            {
+                list_remove(&((struct free_block*)ne_blk)->elem);
+                mark_block_used(blk,blk_size(ne_blk)+blk_size(blk));
+            }
+            return blk;
+            
+        }
+        
+    }
+    else if(prev_alloc)
+    {
+
+    }
+    return NULL;
+
 }
 
 /* 
@@ -577,17 +634,17 @@ static struct block *find_fit(size_t asize)
     for(;list_index < NUM_LISTS; list_index++)
     {
         struct list_elem *e = list_begin(&freeblock_list[list_index].list);
-    for (; e != list_end(&freeblock_list[list_index].list); e = list_next(e))
-    {
-        struct free_block *bp = list_entry(e,struct free_block,elem);
-        if (blk_free((struct block*)bp) && asize <= blk_size((struct block*)bp)) {
-            return (struct block*)bp;
+        int count = 0;
+        for (; e != list_end(&freeblock_list[list_index].list); e = list_next(e))
+        {
+            struct free_block *bp = list_entry(e,struct free_block,elem);
+            if (blk_free((struct block*)bp) && asize <= blk_size((struct block*)bp))  return (struct block*)bp;
+            
         }
     }
-    }
     #endif
+    /* No fit */
     return NULL;
-     /* No fit */
 }
 
 team_t team = {
