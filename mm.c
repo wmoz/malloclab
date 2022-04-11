@@ -652,12 +652,17 @@ static struct block *find_fit(size_t asize)
 
     for (; list_index < NUM_LISTS; list_index++)
     {
+        int count = 0;
         struct list_elem *e = list_begin(&freeblock_list[list_index].list);
         for (; e != list_end(&freeblock_list[list_index].list); e = list_next(e))
         {
+            if (count == 5) {
+                break;
+            }
             struct free_block *bp = list_entry(e, struct free_block, elem);
             if (blk_free((struct block *)bp) && asize <= blk_size((struct block *)bp))
                 return (struct block *)bp;
+            count++;
         }
     }
 #endif
